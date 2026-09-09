@@ -1,0 +1,11 @@
+.env
+.venv
+venv
+*.csv
+*.json
+*.jsonl
+*.log
+
+
+__pycache__/
+.idea/

@@ -12,17 +12,18 @@ from selenium.webdriver.support import expected_conditions as EC
 class Discovery:
     def __init__(self):
         self._logger = Log.get_logger(config.LOG_PATH)
-        self._driver = get_driver(config.DRIVER_PATH)
-        self._wait = WebDriverWait(self._driver, 10)
     
     def _signin(self):
         try:
             self._logger.info("Starting signin process")
 
-            self._driver.get(config.BASE_URL)
+            driver = get_driver(config.DRIVER_PATH)
+            driver.get(config.BASE_URL)
+
+            wait = WebDriverWait(driver, 10)
 
             # After landing on the site, first button to press
-            land_button = self._wait.until(
+            land_button = wait.until(
                 EC.element_to_be_clickable(
                     (By.XPATH, "//div[contains(@class, 'vtex-login')]//button[contains(@class, 'vtex-button')]")
                 ),
@@ -32,7 +33,7 @@ class Discovery:
             self._logger.info("land_button clicked")
 
             # After previous button, a popup window spawns where we need to select an option
-            options_button = self._wait.until(
+            options_button = wait.until(
                 EC.element_to_be_clickable(
                     (By.XPATH, "//div[contains(@class, 'emailPasswordOptionBtn')]//button[contains(@class, 'vtex-button')]")
                 ),
@@ -44,7 +45,7 @@ class Discovery:
             # After that we shoulds have the signin form available
 
             # Email input
-            email_input = self._wait.until(
+            email_input = wait.until(
                 EC.visibility_of_element_located(
                     (By.XPATH, "//div[contains(@class, 'inputContainerEmail')]//input")
                 ),
@@ -55,7 +56,7 @@ class Discovery:
             self._logger.info("email_input filled")
 
             # Password input
-            password_input = self._wait.until(
+            password_input = wait.until(
                 EC.visibility_of_element_located(
                     (By.XPATH, "//div[contains(@class, 'inputContainerPassword')]//input")
                 ),
@@ -66,7 +67,7 @@ class Discovery:
             self._logger.info("password_input filled")
 
             # Submit button
-            submit_button = self._wait.until(
+            submit_button = wait.until(
                 EC.visibility_of_element_located(
                     (By.XPATH, "//div[contains(@class, 'sendButton')]//button[contains(@class, 'vtex-button')]")
                 ),
@@ -76,14 +77,14 @@ class Discovery:
             self._logger.info("submit_button clicked")
 
             # Wait for the cookies
-            self._wait.until(
+            wait.until(
                 lambda d: d.get_cookie("VtexIdclientAutCookie_veaargentina"),
                 message = "Cookie was not set"
             )
 
             cookies = {
                 c["name"]: c["value"] 
-                for c in self._driver.get_cookies()
+                for c in driver.get_cookies()
                 if c["name"].startswith("VtexIdclientAutCookie_")
             }
 
@@ -94,7 +95,7 @@ class Discovery:
         except Exception as e:
             self._logger.error(f"There was an error signing in. Error: {e}")
         finally:
-            self._driver.quit()
+            driver.quit()
     
     def _load_cookies(self, cookies):
         try:

@@ -18,3 +18,7 @@ ACCOUNT_EMAIL = os.getenv("ACCOUNT_EMAIL")
 ACCOUNT_PASSWORD = os.getenv("ACCOUNT_PASSWORD")
 
 DRIVER_PATH = "./drivers/chromedriver"
+
+# PROVINCES = ["Chubut", "Buenos Aires", "Santiago del Estero", "Cordoba", "Rio Negro", "Buenos Aires", "San Luis", "La Rioja", "Misiones", "Cordoba", "Tierra del Fuego"]
+PROVINCES = ["Buenos Aires"]
+KEYWORDS = ["Shampoo", "Cerveza", "Crema", "Carne", "Verdura", "Vino", "Electrodomesticos", "Tecnologia", "Carne", "Pollo"]

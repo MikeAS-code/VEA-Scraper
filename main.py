@@ -7,15 +7,17 @@ from curl_cffi import requests
 from lxml import html
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.ui import Select
 from selenium.webdriver.support import expected_conditions as EC
 
 class Discovery:
     def __init__(self):
         self._logger = Log.get_logger(config.LOG_PATH)
+        self._records = set()
     
-    def _signin(self):
+    def _signin_and_select_region(self, province):
         try:
-            self._logger.info("Starting signin process")
+            self._logger.info(f"Starting signin process for {province}")
 
             driver = get_driver(config.DRIVER_PATH)
             driver.get(config.BASE_URL)
@@ -23,24 +25,24 @@ class Discovery:
             wait = WebDriverWait(driver, 10)
 
             # After landing on the site, first button to press
-            land_button = wait.until(
+            my_account_button = wait.until(
                 EC.element_to_be_clickable(
                     (By.XPATH, "//div[contains(@class, 'vtex-login')]//button[contains(@class, 'vtex-button')]")
                 ),
-                message="land_button not found or not clickable"
+                message = "my_account_button was not found"
             )
-            land_button.click()
-            self._logger.info("land_button clicked")
+            my_account_button.click()
+            self._logger.info("my_account_button found and clicked")
 
-            # After previous button, a popup window spawns where we need to select an option
-            options_button = wait.until(
+            # After previous button, a popup window spawns where we need to select an auth option
+            auth_options_button = wait.until(
                 EC.element_to_be_clickable(
                     (By.XPATH, "//div[contains(@class, 'emailPasswordOptionBtn')]//button[contains(@class, 'vtex-button')]")
                 ),
-                message="options_button not found or not clickable"
+                message = "auth_options_button was not found"
             )
-            options_button.click()
-            self._logger.info("options_button clicked")
+            auth_options_button.click()
+            self._logger.info("auth_options_button found and clicked")
 
             # After that we shoulds have the signin form available
 
@@ -49,46 +51,95 @@ class Discovery:
                 EC.visibility_of_element_located(
                     (By.XPATH, "//div[contains(@class, 'inputContainerEmail')]//input")
                 ),
-                message="email_input not found or not visible"
+                message = "email_input was not found or is not visible"
             )
             email_input.clear()
             email_input.send_keys(config.ACCOUNT_EMAIL)
-            self._logger.info("email_input filled")
+            self._logger.info("email_input found and filled")
 
             # Password input
             password_input = wait.until(
                 EC.visibility_of_element_located(
                     (By.XPATH, "//div[contains(@class, 'inputContainerPassword')]//input")
                 ),
-                message="password_input not found or not visible"
+                message = "password_input was not found or is not visible"
             )
             password_input.clear()
             password_input.send_keys(config.ACCOUNT_PASSWORD)
-            self._logger.info("password_input filled")
+            self._logger.info("password_input found and filled")
 
-            # Submit button
+            # Signin form submit button
             submit_button = wait.until(
                 EC.visibility_of_element_located(
                     (By.XPATH, "//div[contains(@class, 'sendButton')]//button[contains(@class, 'vtex-button')]")
                 ),
-                message="submit_button not found or not clickable"
+                message = "submit_button was not found"
             )
             submit_button.click()
-            self._logger.info("submit_button clicked")
-
-            # Wait for the cookies
-            wait.until(
-                lambda d: d.get_cookie("VtexIdclientAutCookie_veaargentina"),
-                message = "Cookie was not set"
+            self._logger.info("submit_button found and clicked")
+            
+            # After signin, we need to select the delivery method
+            method_button = wait.until(
+                EC.element_to_be_clickable(
+                    (By.XPATH, "//div[contains(@class, 'veaargentina-delivery-modal-1-x-containerTrigger')]/parent::div"),
+                ),
+                message = "method_button was not found"
             )
+            method_button.click()
+            self._logger.info("method_button found and clicked")
+
+            # From the popup window we select the pickup delivery option
+            pickup_option = wait.until(
+                EC.element_to_be_clickable(
+                    (By.XPATH, "//div[contains(@class, 'veaargentina-delivery-modal-1-x-pickUpSelectionContainer')]//button[contains(@class, 'vtex-button')]")
+                ),
+                message = "pickup_option was not found"
+            )
+            pickup_option.click()
+            self._logger("pickup_option was clicked")
+
+            # From the popup window we select the region we want to scrape from
+            region_option = wait.until(
+                EC.element_to_be_clickable(
+                    (By.XPATH, "(//div[contains(@class, 'veaargentina-delivery-modal-1-x-StoresDropDownContainer')]//select)[1]")
+                ),
+                message = "region_option was not found"
+            )
+            region_dropdown = Select(region_option)
+            region_dropdown.select_by_visible_text(province)
+            self._logger.info(f"region_option found and {province} selected")
+
+            # From the popup window we select the first possible store option
+            store_option = wait.until(
+                EC.element_to_be_clickable(
+                    (By.XPATH, "(//div[contains(@class, 'veaargentina-delivery-modal-1-x-StoresDropDownContainer')]//select)[2]")
+                ),
+                message = "store_option was not found"
+            )
+            store_dropdown = Select(store_option)
+            store_dropdown.select_by_index(1)
+            self._logger.info("store_option found and first option selected")
+
+
+            # From the popup window we submit the form
+            confirm_button = wait.until(
+                EC.element_to_be_clickable(
+                    (By.XPATH, "//div[contains(@class, 'veaargentina-delivery-modal-1-x-buttonsContainer')]//button[contains(@class, 'vtex-button')]")
+                ),
+                message = "confirm_button was not found"
+            )
+            confirm_button.click()
+            self._logger.info("confirm_button found and clicked")
+            
+            # We wait for 5 seconds for the cookies to be set
 
             cookies = {
                 c["name"]: c["value"] 
                 for c in driver.get_cookies()
-                if c["name"].startswith("VtexIdclientAutCookie_")
             }
+            self._logger.info("Cookies set successfully")
 
-            self._logger.info("Signin process completed successfully")
+            self._logger.info("Signin and region selection process completed successfully")
 
             return cookies
 
@@ -97,48 +148,15 @@ class Discovery:
         finally:
             driver.quit()
     
-    def _load_cookies(self, driver, cookies):
-        try:
-            self._logger.info("Starting cookies loading process")
-
-            for name, value in cookies.items():
-                driver.add_cookie({"name": name, "value": value})
-            
-            driver.refresh()
-
-            self._logger.info("Cookies loaded successfully")
-
-        except Exception as e:
-            self._logger.error(f"There was an error loading the cookies. Error: {e}")
-
-    def _select_region(self, cookies):
-        try:
-            self._logger.info("Starting region selection process")
-
-            driver = get_driver(config.DRIVER_PATH)
-            driver.get(config.BASE_URL)
-
-            wait = WebDriverWait(driver, 10)
-
-            self._load_cookies(driver, cookies)
-
-            open_select_button = wait.until(
-                EC.element_to_be_clickable(
-                    (By.XPATH, "//div[contains(@class, 'veaargentina-delivery-modal-1-x-containerTrigger')]/parent::div"),
-                    message = "open_select_button was not found or is not clickable"
-                )
-            )
-            open_select_button.click()
-
-        except Exception as e:
-            self._logger.error(f"There was an error selecting the region. Error: {e}")
-        finally:
-            self._driver.quit()
-
+    def _get_producs(self):
+        pass
+    
     def run(self):
         try:
-           cookies = self._signin()
-           print(cookies)
+            provinces = config.PROVINCES
+            for index, p in enumerate(provinces):
+                province_cookies = self._signin_and_select_region(p.strip().casefold())
+                print(province_cookies)
 
         except Exception as e:
             print(f"There was an error in the discovery process. Error: {e}")

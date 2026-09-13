@@ -75,14 +75,6 @@ class Discovery:
             submit_button.click()
             self._logger.info("submit_button clicked")
 
-            # Wait until form unmounts
-            self._wait.until(
-                EC.invisibility_of_element_located(
-                    (By.XPATH, "//div[contains(@class, 'inputContainerEmail')]")
-                ),
-                message="form not unmounting"
-            )
-
             # Wait for the cookies
             self._wait.until(
                 lambda d: d.get_cookie("VtexIdclientAutCookie_veaargentina"),

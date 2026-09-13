@@ -97,14 +97,14 @@ class Discovery:
         finally:
             driver.quit()
     
-    def _load_cookies(self, cookies):
+    def _load_cookies(self, driver, cookies):
         try:
             self._logger.info("Starting cookies loading process")
 
             for name, value in cookies.items():
-                self._driver.add_cookie({"name": name, "value": value})
+                driver.add_cookie({"name": name, "value": value})
             
-            self._driver.refresh()
+            driver.refresh()
 
             self._logger.info("Cookies loaded successfully")
 
@@ -115,11 +115,23 @@ class Discovery:
         try:
             self._logger.info("Starting region selection process")
 
-            self._driver.get(config.BASE_URL)
+            driver = get_driver(config.DRIVER_PATH)
+            driver.get(config.BASE_URL)
 
-            self._load_cookies(cookies)
+            wait = WebDriverWait(driver, 10)
+
+            self._load_cookies(driver, cookies)
+
+            open_select_button = wait.until(
+                EC.element_to_be_clickable(
+                    (By.XPATH, "//div[contains(@class, 'veaargentina-delivery-modal-1-x-containerTrigger')]/parent::div"),
+                    message = "open_select_button was not found or is not clickable"
+                )
+            )
+            open_select_button.click()
+
         except Exception as e:
-            print(f"There was an error selecting the region. Error: {e}")
+            self._logger.error(f"There was an error selecting the region. Error: {e}")
         finally:
             self._driver.quit()
 

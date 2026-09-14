@@ -7,7 +7,10 @@ import pandas as pd
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select, WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.keys import Keys
 import time
+import json
+import base64
 
 class Crawler:
 
@@ -66,7 +69,7 @@ class Crawler:
 
         self.logger.info('Sesion Iniciada')
 
-    def cargamos_provincia(self, driver, provincia):
+    def cargar_provincia(self, driver, provincia):
 
         boton_retiro = WebDriverWait(driver, 30).until(
             EC.element_to_be_clickable((
@@ -79,34 +82,54 @@ class Crawler:
 
         time.sleep(3)
 
-        select_provincia = Select(
-            WebDriverWait(driver, 20).until(
-                EC.presence_of_element_located((
-                    By.XPATH,
-                    "//select[option[@value='' and normalize-space()='Seleccionar Provincia']]"
-                ))
-            )
+        select_element = WebDriverWait(driver, 20).until(
+            EC.presence_of_element_located((
+                By.XPATH,
+                "//select[option[contains(normalize-space(), 'Seleccionar Provincia')]]"
+            ))
         )
 
-        select_provincia.select_by_visible_text(provincia)
+        provincia = provincia.upper().strip()
 
+        print(f"Seleccionando provincia: {provincia}")
+
+        driver.execute_script("""
+            const select = arguments[0];
+            const value = arguments[1];
+
+            select.value = value;
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+        """, select_element, provincia)
+
+        print("Value:", select_element.get_attribute("value"))
         time.sleep(3)
 
         select_tienda = WebDriverWait(driver, 20).until(
-            lambda driver: (
-                Select(driver.find_element(
-                    By.XPATH,
-                    "//select[option[@value='' and normalize-space()='Seleccionar tienda']]"
-                ))
-                if len(Select(driver.find_element(
-                    By.XPATH,
-                    "//select[option[@value='' and normalize-space()='Seleccionar tienda']]"
-                )).options) > 1
-                else False
-            )
+            EC.presence_of_element_located((
+                By.XPATH,
+                "//select[option[contains(normalize-space(), 'Seleccionar tienda')]]"
+            ))
         )
 
-        select_tienda.select_by_index(1)
+        driver.execute_script("""
+            const select = arguments[0];
+
+            // La primera opción disponible después de la opción deshabilitada
+            const option = Array.from(select.options)
+                .find(option => !option.disabled && option.value !== '');
+
+            if (option) {
+                select.value = option.value;
+
+                select.dispatchEvent(
+                    new Event('input', { bubbles: true })
+                );
+
+                select.dispatchEvent(
+                    new Event('change', { bubbles: true })
+                );
+            }
+        """, select_tienda)
 
         time.sleep(3)
 
@@ -119,15 +142,78 @@ class Crawler:
 
         boton_confirmar.click()
 
+    def generar_params(self,keyword, desde=0, cantidad=20):
+        hasta = desde + cantidad - 1
+
+        variables = {
+            "skusFilter": "ALL",
+            "simulationBehavior": "default",
+            "installmentCriteria": "MAX_WITHOUT_INTEREST",
+            "productOriginVtex": False,
+            "map": "ft",
+            "query": keyword,
+            "orderBy": "OrderByScoreDESC",
+            "from": desde,
+            "to": hasta,
+            "selectedFacets": [
+                {
+                    "key": "ft",
+                    "value": keyword
+                }
+            ],
+            "fullText": keyword,
+            "operator": "and",
+            "fuzzy": "0",
+            "searchState": None,
+            "hideUnavailableItems": True,
+            "facetsBehavior": "Static",
+            "categoryTreeBehavior": "default",
+            "withFacets": False
+        }
+
+        variables_base64 = base64.b64encode(
+            json.dumps(
+                variables,
+                separators=(",", ":"),
+                ensure_ascii=False
+            ).encode("utf-8")
+        ).decode("utf-8")
+
+        extensions = {
+            "persistedQuery": {
+                "version": 1,
+                "sha256Hash": "b398fc0a2fd04ea5d4f7a94c732c10fb1bf64f8f9a2b31c92aee6a5e796457c9",
+                "sender": "vtex.store-resources@0.x",
+                "provider": "vtex.search-graphql@0.x"
+            },
+            "variables": variables_base64
+        }
+
+        return {
+            "workspace": "master",
+            "maxAge": "short",
+            "appsEtag": "remove",
+            "domain": "store",
+            "locale": "es-AR",
+            "__bindingId": "6890cd39-87c6-4689-ad4f-3b913f3c0b19",
+            "operationName": "productSearchV3",
+            "variables": "{}",
+            "extensions": json.dumps(
+                extensions,
+                separators=(",", ":")
+            )
+        }
+
     def run(self):
         self.logger.info('Start Crawler')
+
         driver = get_driver(config.CHROMEDRIVER_PATH)
         keywords = self.get_keywords()
 
         try:
             driver.get(config.URL_BASE)
             self.login(driver)
-            time.sleep(10)
+            time.sleep(5)
 
             for provincia, lista_keywords in keywords.items():
 
@@ -135,7 +221,13 @@ class Crawler:
                     f'Cargamos provincia: {provincia}'
                 )
 
-                self.cargamos_provincia(driver, provincia)
+                self.cargar_provincia(driver, provincia)
+
+                cookies = driver.get_cookies()
+                cookies = {
+                    cookie["name"]: cookie["value"]
+                    for cookie in driver.get_cookies()
+                }
 
                 for keyword in lista_keywords:
 
@@ -143,10 +235,71 @@ class Crawler:
                         f'Procesando keyword: {keyword}'
                     )
 
-                    # Acá hacés el scraping de esa keyword
-                    # self.scrapear(driver, keyword)
+                    desde = 0
+                    cantidad = 20
+                    todos_productos = []
+
+                    while True:
+
+                        self.logger.info(
+                            f'Buscando productos {desde} - {desde + cantidad - 1}'
+                        )
+
+                        params = self.generar_params(
+                            keyword,
+                            desde,
+                            cantidad
+                        )
+
+                        while True:
+                            response = requests.get(
+                                config.URL_API,
+                                params=params,
+                                cookies=cookies,
+                                headers=config.HEADERS
+                            )
+
+                            if response.status_code == 200:
+                                break
+
+                            self.logger.warning(
+                                f'Error HTTP {response.status_code}. Reintentando...'
+                            )
+
+                            time.sleep(1)
+
+                        data = response.json()
+
+                        # Acá tenemos que sacar los productos
+                        productos = data["data"]["productSearch"]["products"]
+
+                        cantidad_productos = len(productos)
+
+                        self.logger.info(
+                            f'Productos encontrados: {cantidad_productos}'
+                        )
+
+                        if not productos:
+                            break
+
+                        todos_productos.extend(productos)
+
+                        # Si devuelve menos de 20,
+                        # significa que llegamos al final
+                        if cantidad_productos < cantidad:
+                            break
+
+                        desde += cantidad
+
+                    self.logger.info(
+                        f'Total productos para "{keyword}": '
+                        f'{len(todos_productos)}'
+                    )
+
+                    print(todos_productos)
 
             input("Press Enter to close the browser...")
+
 
         finally:
             driver.quit()

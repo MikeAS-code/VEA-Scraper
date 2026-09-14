@@ -14,6 +14,11 @@ def get_driver(driver_path: str):
     # Configuración del navegador Chrome
     options = Options()
 
+    options.set_capability(
+        "goog:loggingPrefs",
+        {"performance": "ALL"}
+    )
+
     # Abre Chrome maximizado
     options.add_argument("--start-maximized")
 

@@ -204,8 +204,48 @@ class Crawler:
             )
         }
 
+    def parsear_producto(self, producto):
+        output_name = producto.get("productName"," ")
+        output_link = producto.get("link"," ")
+        output_selling_price = producto.get("priceRange", {}).get("sellingPrice", {}).get("lowPrice", 0)
+        output_list_price = producto.get("priceRange", {}).get("listPrice", {}).get("lowPrice", 0)
+
+        items = producto.get("items", [])
+
+        image_url = None
+
+        if items:
+            images = items[0].get("images", [])
+
+            if images:
+                image_url = images[0].get("imageUrl")
+                
+        output_promotion = [
+            cluster.get("name")
+            for cluster in producto.get("productClusters", [])
+        ]
+
+        return {
+            "output_name": output_name,
+            "output_link": output_link,
+            "output_selling_price": output_selling_price,
+            "output_image": image_url,
+            "output_list_price": output_list_price,
+            "output_promotion": output_promotion
+        }  
+
+    def guardar_json(self, data, archivo="output.json"):
+        with open(archivo, "w", encoding="utf-8") as f:
+            json.dump(
+                data,
+                f,
+                ensure_ascii=False,
+                indent=4
+            )
+
     def run(self):
         self.logger.info('Start Crawler')
+        output = {}
 
         driver = get_driver(config.CHROMEDRIVER_PATH)
         keywords = self.get_keywords()
@@ -223,6 +263,8 @@ class Crawler:
 
                 self.cargar_provincia(driver, provincia)
 
+                output[provincia] = {}
+
                 cookies = driver.get_cookies()
                 cookies = {
                     cookie["name"]: cookie["value"]
@@ -234,6 +276,8 @@ class Crawler:
                     self.logger.info(
                         f'Procesando keyword: {keyword}'
                     )
+
+                    output[provincia][keyword] = []
 
                     desde = 0
                     cantidad = 20
@@ -273,6 +317,15 @@ class Crawler:
                         # Acá tenemos que sacar los productos
                         productos = data["data"]["productSearch"]["products"]
 
+                        if productos:
+                             for producto in productos:
+                                producto_parseado = self.parsear_producto(producto)
+                                output[provincia][keyword].append(
+                                    producto_parseado
+                                )
+
+                        self.guardar_json(output)        
+
                         cantidad_productos = len(productos)
 
                         self.logger.info(
@@ -295,8 +348,6 @@ class Crawler:
                         f'Total productos para "{keyword}": '
                         f'{len(todos_productos)}'
                     )
-
-                    print(todos_productos)
 
             input("Press Enter to close the browser...")
 

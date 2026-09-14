@@ -204,22 +204,99 @@ class Crawler:
             )
         }
 
+    def obtener_headers_request(self, driver, url_api):
+        """
+        Busca en los logs de Chrome la request real a productSearchV3
+        y devuelve sus headers.
+        """
+
+        inicio = time.time()
+
+        while time.time() - inicio < 15:
+
+            logs = driver.get_log("performance")
+
+            for log in logs:
+
+                try:
+                    mensaje = json.loads(
+                        log["message"]
+                    )["message"]
+                except Exception:
+                    continue
+
+                if mensaje["method"] != "Network.requestWillBeSent":
+                    continue
+
+                request = mensaje["params"]["request"]
+
+                url = request.get("url", "")
+
+                if url_api not in url:
+                    continue
+
+                headers = request.get("headers", {})
+
+                ignorar = {
+                    ":authority",
+                    ":method",
+                    ":path",
+                    ":scheme",
+                    "host",
+                    "content-length"
+                }
+
+                headers = {
+                    key: value
+                    for key, value in headers.items()
+                    if key.lower() not in ignorar
+                }
+
+                self.logger.info(
+                    f"Request VTEX encontrada: {url}"
+                )
+
+                self.logger.info(
+                    f"Headers encontrados: {len(headers)}"
+                )
+
+                return headers
+
+            time.sleep(0.2)
+
+        self.logger.warning(
+            "No se encontró la request productSearchV3."
+        )
+
+        return {}
+
     def parsear_producto(self, producto):
-        output_name = producto.get("productName"," ")
-        output_link = producto.get("link"," ")
-        output_selling_price = producto.get("priceRange", {}).get("sellingPrice", {}).get("lowPrice", 0)
-        output_list_price = producto.get("priceRange", {}).get("listPrice", {}).get("lowPrice", 0)
+
+        output_name = producto.get("productName", "")
+        output_link = producto.get("link", "")
+
+        output_selling_price = 0
+        output_list_price = 0
 
         items = producto.get("items", [])
 
         image_url = None
 
         if items:
+
             images = items[0].get("images", [])
 
             if images:
                 image_url = images[0].get("imageUrl")
-                
+
+            sellers = items[0].get("sellers", [])
+
+            if sellers:
+                offer = sellers[0].get("commertialOffer", {})
+
+                output_selling_price = offer.get("Price", 0)
+                output_list_price = offer.get("ListPrice", 0)
+
         output_promotion = [
             cluster.get("name")
             for cluster in producto.get("productClusters", [])
@@ -232,7 +309,7 @@ class Crawler:
             "output_image": image_url,
             "output_list_price": output_list_price,
             "output_promotion": output_promotion
-        }  
+        }
 
     def guardar_json(self, data, archivo="output.json"):
         with open(archivo, "w", encoding="utf-8") as f:
@@ -242,6 +319,45 @@ class Crawler:
                 ensure_ascii=False,
                 indent=4
             )
+
+    def buscar_en_navegador(self, driver, keyword):
+
+        self.logger.info(
+            f"Buscando en navegador: {keyword}"
+        )
+
+        input_busqueda = WebDriverWait(driver, 30).until(
+            EC.element_to_be_clickable((
+                By.XPATH,
+                "//input[@placeholder='¡Hola! ¿Qué estás buscando?']"
+            ))
+        )
+
+        input_busqueda.send_keys(keyword)
+        input_busqueda.send_keys(Keys.ENTER)
+
+        self.logger.info(
+            f"Keyword ingresado y ENTER enviado: {keyword}"
+        )
+
+        time.sleep(8)
+
+        self.logger.info(
+            f"URL actual: {driver.current_url}"
+        )
+
+    def obtener_cookies(self, driver):
+
+        cookies = {
+            cookie["name"]: cookie["value"]
+            for cookie in driver.get_cookies()
+        }
+
+        self.logger.info(
+            f"Cookies encontradas: {len(cookies)}"
+        )
+
+        return cookies
 
     def run(self):
         self.logger.info('Start Crawler')
@@ -265,17 +381,45 @@ class Crawler:
 
                 output[provincia] = {}
 
-                cookies = driver.get_cookies()
-                cookies = {
-                    cookie["name"]: cookie["value"]
-                    for cookie in driver.get_cookies()
-                }
-
                 for keyword in lista_keywords:
 
                     self.logger.info(
                         f'Procesando keyword: {keyword}'
                     )
+
+                    # =====================================================
+                    # 1. BUSCAR EN EL NAVEGADOR
+                    # =====================================================
+
+                    self.buscar_en_navegador(
+                        driver,
+                        keyword
+                    )
+
+                    # =====================================================
+                    # 2. CAPTURAR HEADERS DE LA REQUEST REAL DE VTEX
+                    # =====================================================
+
+                    headers = self.obtener_headers_request(
+                        driver,
+                        config.URL_API
+                    )
+
+                    if not headers:
+                        raise RuntimeError(
+                            f"No se pudieron capturar los headers para "
+                            f"la búsqueda: {keyword}"
+                        )
+
+                    # =====================================================
+                    # 3. CAPTURAR COOKIES DESPUÉS DE LA BÚSQUEDA
+                    # =====================================================
+
+                    cookies = self.obtener_cookies(driver)
+
+                    # =====================================================
+                    # 4. AHORA SÍ USAMOS CURL_CFFI
+                    # =====================================================
 
                     output[provincia][keyword] = []
 
@@ -286,7 +430,8 @@ class Crawler:
                     while True:
 
                         self.logger.info(
-                            f'Buscando productos {desde} - {desde + cantidad - 1}'
+                            f'Buscando productos {desde} - '
+                            f'{desde + cantidad - 1}'
                         )
 
                         params = self.generar_params(
@@ -295,41 +440,52 @@ class Crawler:
                             cantidad
                         )
 
-                        while True:
-                            response = requests.get(
-                                config.URL_API,
-                                params=params,
-                                cookies=cookies,
-                                headers=config.HEADERS
-                            )
+                        response = requests.get(
+                            config.URL_API,
+                            params=params,
+                            cookies=cookies,
+                            headers=headers
+                        )
 
-                            if response.status_code == 200:
-                                break
+                        if response.status_code != 200:
 
                             self.logger.warning(
-                                f'Error HTTP {response.status_code}. Reintentando...'
+                                f'Error HTTP {response.status_code}. '
+                                f'Reintentando...'
                             )
 
                             time.sleep(1)
+                            continue
 
                         data = response.json()
 
-                        # Acá tenemos que sacar los productos
-                        productos = data["data"]["productSearch"]["products"]
+                        productos = data[
+                            "data"
+                        ][
+                            "productSearch"
+                        ][
+                            "products"
+                        ]
 
                         if productos:
-                             for producto in productos:
-                                producto_parseado = self.parsear_producto(producto)
+
+                            for producto in productos:
+
+                                producto_parseado = (
+                                    self.parsear_producto(producto)
+                                )
+
                                 output[provincia][keyword].append(
                                     producto_parseado
                                 )
 
-                        self.guardar_json(output)        
+                        self.guardar_json(output)
 
                         cantidad_productos = len(productos)
 
                         self.logger.info(
-                            f'Productos encontrados: {cantidad_productos}'
+                            f'Productos encontrados: '
+                            f'{cantidad_productos}'
                         )
 
                         if not productos:
@@ -337,8 +493,6 @@ class Crawler:
 
                         todos_productos.extend(productos)
 
-                        # Si devuelve menos de 20,
-                        # significa que llegamos al final
                         if cantidad_productos < cantidad:
                             break
 
